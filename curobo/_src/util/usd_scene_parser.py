@@ -167,7 +167,7 @@ def get_mesh_attrs(prim, cache=None, transform=None) -> Optional[Mesh]:
     Args:
         prim: The USD prim to extract from.
         cache: UsdGeom.XformCache for transform computation.
-        transform: Optional additional transformation matrix to bake into mesh vertices.
+        transform: Optional additional transformation matrix to apply.
 
     Returns:
         Mesh obstacle instance, or None if mesh data is invalid.
@@ -181,12 +181,21 @@ def get_mesh_attrs(prim, cache=None, transform=None) -> Optional[Mesh]:
     vertices = np.asarray(
         [world_transform.Transform(Gf.Vec3d(*point)) for point in points], dtype=np.float32
     )
+    mat, _ = get_prim_world_pose(cache, prim)
     linear_transform = np.asarray(world_transform.ExtractRotationMatrix(), dtype=np.float32)
     if transform is not None:
         vertices = vertices @ transform[:3, :3].T + transform[:3, 3]
+        mat = transform @ mat
         linear_transform = transform[:3, :3] @ linear_transform
 
-    if np.linalg.det(linear_transform) < 0.0:
+    reflected_transform = np.linalg.det(linear_transform) < 0.0
+    if reflected_transform:
+        mat[:3, :3] = np.eye(3, dtype=mat.dtype)
+
+    inverse_pose = np.linalg.inv(mat)
+    vertices = vertices @ inverse_pose[:3, :3].T + inverse_pose[:3, 3]
+
+    if reflected_transform:
         flipped_faces = []
         face_start = 0
         for face_count in face_counts:
@@ -195,9 +204,11 @@ def get_mesh_attrs(prim, cache=None, transform=None) -> Optional[Mesh]:
             face_start = face_end
         faces = flipped_faces
 
+    tensor_mat = torch.as_tensor(mat, device=torch.device("cuda", 0))
+    pose = Pose.from_matrix(tensor_mat).tolist()
     m = Mesh.from_polygon_faces(
         name=str(prim.GetPath()),
-        pose=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        pose=pose,
         vertices=vertices.tolist(),
         faces=faces,
         face_counts=face_counts,

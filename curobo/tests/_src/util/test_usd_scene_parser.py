@@ -270,7 +270,10 @@ class TestGeometryExtractors:
         assert len(extracted.faces) == 2
         assert extracted.faces == [[1, 3, 0], [1, 2, 3]]
 
-    def test_get_mesh_attrs_bakes_reflected_transform_and_reference_frame(self, tmp_path):
+    @pytest.mark.parametrize("reader_type", [UsdSceneParser, UsdWriter])
+    def test_get_mesh_attrs_bakes_reflected_transform_and_reference_frame(
+        self, tmp_path, reader_type
+    ):
         """Test mesh extraction preserves reflected world transforms."""
         stage = create_stage(str(tmp_path / "reflected_mesh.usd"))
         reference_path = "/world/reference"
@@ -289,9 +292,9 @@ class TestGeometryExtractors:
             scale=[-1.0, 2.0, 1.0],
         )
 
-        parser = UsdSceneParser()
-        parser.load_stage(stage)
-        scene = parser.get_obstacles_from_stage(
+        reader = reader_type()
+        reader.load_stage(stage)
+        scene = reader.get_obstacles_from_stage(
             only_paths=[mesh_path], reference_prim_path=reference_path
         )
 
@@ -309,8 +312,18 @@ class TestGeometryExtractors:
             [0.5, -0.25, 0.75], dtype=np.float32
         )
 
-        np.testing.assert_allclose(extracted.vertices, expected_reference_points)
-        assert extracted.pose == [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+        np.testing.assert_allclose(extracted.pose[:3], [0.75, 0.75, -0.5], atol=1e-6)
+        np.testing.assert_allclose(extracted.pose[3:], [1.0, 0.0, 0.0, 0.0], atol=1e-6)
+        np.testing.assert_allclose(
+            extracted.vertices,
+            [[0.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+            atol=1e-6,
+        )
+
+        transformed_vertices = np.asarray(extracted.vertices) + np.asarray(
+            extracted.pose[:3], dtype=np.float32
+        )
+        np.testing.assert_allclose(transformed_vertices, expected_reference_points)
 
         triangle = np.asarray(extracted.vertices)[np.asarray(extracted.faces[0])]
         assert np.cross(triangle[1] - triangle[0], triangle[2] - triangle[0])[2] > 0.0
