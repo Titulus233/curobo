@@ -255,7 +255,11 @@ class VoxelData:
         size_t = torch.as_tensor(
             np.array([voxel_grid.voxel_size]), device=device_cfg.device, dtype=device_cfg.dtype
         ).unsqueeze(-1)
-        grid_t = dims_t / size_t
+        grid_t = torch.as_tensor(
+            np.array([voxel_grid.get_grid_shape()[0]]),
+            device=device_cfg.device,
+            dtype=device_cfg.dtype,
+        )
         params_t = torch.cat([grid_t, size_t], dim=-1)
 
         params[env_idx, 0, :] = params_t[0]
@@ -436,7 +440,11 @@ class VoxelData:
         size_t = torch.as_tensor(
             np.array(size_batch), device=self.device_cfg.device, dtype=self.device_cfg.dtype
         ).unsqueeze(-1)
-        grid_t = dims_t / size_t
+        grid_t = torch.as_tensor(
+            np.array([voxel.get_grid_shape()[0] for voxel in voxel_grids]),
+            device=self.device_cfg.device,
+            dtype=self.device_cfg.dtype,
+        )
         params_t = torch.cat([grid_t, size_t], dim=-1)
 
         self.params[env_idx, :num_voxels, :] = params_t
@@ -491,23 +499,29 @@ class VoxelData:
         voxel_name = name if name is not None else voxel_grid.name
         idx = self.get_idx(voxel_name, env_idx)
 
-        feature_tensor = voxel_grid.feature_tensor.view(voxel_grid.feature_tensor.shape[0], -1)
+        feature_tensor = voxel_grid.feature_tensor.view(-1)
         buffer_capacity = self.features.shape[2]
-        n_new = feature_tensor.shape[0]
+        n_new = feature_tensor.numel()
         if n_new > buffer_capacity:
             log_and_raise(
                 f"Feature tensor too large for buffer: capacity={buffer_capacity}"
                 f" new={n_new}. Increase max_voxels_per_layer."
             )
 
-        self.features[env_idx, idx, :n_new, :].copy_(feature_tensor.to(torch.float16))
+        self.features[env_idx, idx, :n_new, :].copy_(
+            feature_tensor.view(-1, 1).to(torch.float16)
+        )
         if n_new < buffer_capacity:
             self.features[env_idx, idx, n_new:, :] = 0
         # params[:3] stores voxel counts (matches load_batch and collision kernel)
         dims_t = torch.as_tensor(
             voxel_grid.dims, device=self.device_cfg.device, dtype=self.device_cfg.dtype
         )
-        grid_t = dims_t / voxel_grid.voxel_size
+        grid_t = torch.as_tensor(
+            voxel_grid.get_grid_shape()[0],
+            device=self.device_cfg.device,
+            dtype=self.device_cfg.dtype,
+        )
         self.params[env_idx, idx, :3].copy_(grid_t)
         self.params[env_idx, idx, 3] = voxel_grid.voxel_size
         # dims[:3] stores world dimensions in meters

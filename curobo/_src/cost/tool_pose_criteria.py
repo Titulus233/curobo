@@ -175,7 +175,8 @@ class ToolPoseCriteria:
         axis: str = "z",
         non_terminal_scale: float = 1.0,
         project_distance_to_goal: bool = True,
-    ):
+        device_cfg: DeviceCfg = DeviceCfg(),
+    ) -> ToolPoseCriteria:
         axis_vector = [0.0, 0.0, 0.0]
         if axis == "x":
             axis_vector[0] = 1.0
@@ -196,6 +197,7 @@ class ToolPoseCriteria:
                 non_terminal_scale * 1.0,
             ],
             project_distance_to_goal=project_distance_to_goal,
+            device_cfg=device_cfg,
         )
 
     @staticmethod

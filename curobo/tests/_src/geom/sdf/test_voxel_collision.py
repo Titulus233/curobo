@@ -628,6 +628,71 @@ class TestVoxelDataCreation:
         assert params[2].item() == pytest.approx(25.0, abs=1.0)  # nz
         assert params[3].item() == pytest.approx(0.02, abs=1e-5)  # voxel_size
 
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+    def test_grid_counts_do_not_truncate_from_float_roundoff(self, device_cfg):
+        """Grid counts remain integral when metric dimensions are slightly below exact."""
+        voxel_size = float(torch.tensor(0.02, dtype=torch.float32).item())
+        grid_count = 15
+        dims = tuple(grid_count * voxel_size for _ in range(3))
+        feature = torch.ones(
+            (grid_count, grid_count, grid_count),
+            dtype=torch.float16,
+            device=device_cfg.device,
+        )
+        feature[10:12, 10:12, 10:12] = 0.0
+        grid = VoxelGrid(
+            name="roundoff_esdf",
+            pose=[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            dims=list(dims),
+            voxel_size=voxel_size,
+            feature_tensor=feature,
+            feature_dtype=torch.float16,
+        )
+        direct_voxel_data = VoxelData.create_from_voxel_grids([grid], device_cfg)
+        assert direct_voxel_data.params[0, 0, :3].tolist() == [15.0, 15.0, 15.0]
+
+        voxel_data = VoxelData.create_cache(
+            max_n=1,
+            num_envs=1,
+            device_cfg=device_cfg,
+            grid_dims=grid.dims,
+            voxel_size=grid.voxel_size,
+        )
+        voxel_data.load_batch([grid], env_idx=0)
+
+        assert voxel_data.params[0, 0, :3].tolist() == [15.0, 15.0, 15.0]
+
+        updated_feature = feature.clone()
+        updated_feature[0, 0, 0] = 0.5
+        voxel_data.update_data(
+            VoxelGrid(
+                name=grid.name,
+                pose=grid.pose,
+                dims=grid.dims,
+                voxel_size=grid.voxel_size,
+                feature_tensor=updated_feature,
+                feature_dtype=torch.float16,
+            )
+        )
+        assert voxel_data.params[0, 0, :3].tolist() == [15.0, 15.0, 15.0]
+        assert torch.equal(
+            voxel_data.features[0, 0, :, 0],
+            updated_feature.view(-1),
+        )
+
+        center = (10.5 - grid_count * 0.5) * voxel_size
+        spheres = torch.tensor(
+            [[[[center, center, center, 0.02]]]],
+            dtype=torch.float32,
+            device=device_cfg.device,
+        )
+        distance, _ = _launch_collision(
+            voxel_data,
+            spheres,
+            activation_distance=0.0,
+        )
+        assert distance.item() > 0.0
+
 
 # ── VoxelDataWarp conversion tests ──
 
